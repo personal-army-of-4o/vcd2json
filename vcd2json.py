@@ -144,7 +144,6 @@ class WaveExtractor:
         end_time = self._end_time
 
         sampler = _SignalSampler(wave_chunk, start_time, end_time)
-        jsongen = _JsonGenerator(path_list, path_dict, wave_chunk)
 
         clock_id = path_dict[path_list[0]]._sid
         id_list = [path_dict[path]._sid for path in path_list]
@@ -158,13 +157,19 @@ class WaveExtractor:
             print()
             print('Create WaveJSON file "{0}".'.format(self._json_file))
             fout = open(self._json_file, 'wt')
-        fout.write(jsongen.create_header())
 
+        firstpass = True
         while True:
             origin = sampler.run(fin, clock_id, value_dict, sample_dict)
             if len(sample_dict[clock_id]) == 0:
                 break
-            fout.write(jsongen.create_body(origin, sample_dict))
+            if firstpass:
+                firstpass = False
+                if wave_chunk == 0:
+                    wave_chunk = len(sample_dict[clock_id])
+                jsongen = _JsonGenerator(path_list, path_dict, wave_chunk)
+                fout.write(jsongen.create_header())
+            fout.write(jsongen.create_body(origin, sample_dict, False))
 
         fout.write(jsongen.create_footer())
         fin.close()
@@ -241,14 +246,15 @@ class _JsonGenerator():
 
     def create_header(self):
         name = "'{0}'".format(self._clock_name).ljust(self._name_width + 2)
-        wave = "'{0}'".format('p' + '.' * (self._wave_chunk - 1))
+        length = self._wave_chunk
+        wave = "'{0}'".format('p' + '.' * (length - 1))
         json = ""
         json += "{ head: {tock:1},\n"
         json += "  signal: [\n"
         json += "  {   name: "+name+", wave: "+wave+" },\n"
         return json
 
-    def create_body(self, origin, sample_dict):
+    def create_body(self, origin, sample_dict, use_groups = True):
 
         def create_wave(samples):
             prev = None
@@ -295,8 +301,9 @@ class _JsonGenerator():
 
         group = "'{0}'".format(origin)
         json = ""
-        json += "  {},\n"
-        json += "  ["+group+",\n"
+        if use_groups:
+            json += "  {},\n"
+            json += "  ["+group+",\n"
         for path in self._path_list[1:]:
             name   = self._path_dict[path]._name
             sid    = self._path_dict[path]._sid
@@ -311,7 +318,9 @@ class _JsonGenerator():
                 wave, data = create_wave_data(sample_dict[sid], length, fmt)
                 json += "    { name: "+name+", wave: "+wave+\
                                             ", data: "+data+" },\n"
-        json += "  ],\n"
+        if use_groups:
+            json += "  ],\n"
+        
         return json
 
     def create_footer(self):
@@ -319,3 +328,11 @@ class _JsonGenerator():
         json += "  ],\n"
         json += "}\n"
         return json
+
+if __name__ == '__main__':
+    import sys
+    name = sys.argv[1]
+    name = sys.argv[1]
+    extractor = WaveExtractor(name + '.vcd', name + '.json', [])
+    extractor.wave_chunk=0
+    extractor.execute()
